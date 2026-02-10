@@ -53,9 +53,6 @@
         .custom-scrollbar::-webkit-scrollbar { width: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-        
-        /* 鎖定樣式 */
-        .locked-input { pointer-events: none; opacity: 0.7; background: transparent !important; border: none !important; }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-900">
@@ -86,7 +83,7 @@
     </nav>
 
     <main class="flex-1 overflow-y-auto p-8">
-        <!-- 儀表板頁面 (內容不變) -->
+        <!-- 儀表板頁面 -->
         <div id="tab-dashboard" class="tab-content active max-w-6xl mx-auto space-y-8">
             <div class="grid grid-cols-1 md:grid-cols-4 gap-5">
                 <div class="bg-white p-6 rounded-3xl shadow-sm border-l-8 border-slate-900 flex justify-between items-start">
@@ -133,7 +130,7 @@
             <div id="dashboard-table-container"></div>
         </div>
 
-        <!-- 數據錄入頁面 (內容不變) -->
+        <!-- 數據錄入頁面 -->
         <div id="tab-calculator" class="tab-content max-w-4xl mx-auto space-y-8">
             <div class="bg-white p-10 rounded-[40px] shadow-sm border border-slate-200">
                 <h2 class="text-2xl font-black mb-8 text-slate-800 flex items-center gap-3">
@@ -163,31 +160,13 @@
             <div id="calculator-table-container"></div>
         </div>
 
-        <!-- 係數資料庫頁面 (增加身份驗證) -->
+        <!-- 係數資料庫頁面 -->
         <div id="tab-settings" class="tab-content max-w-full mx-auto space-y-4">
-            <!-- 登入區塊 -->
-            <div id="admin-auth-panel" class="bg-white p-6 rounded-[24px] border border-slate-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
-                <div class="flex items-center gap-3">
-                    <div id="auth-icon-bg" class="bg-slate-100 p-2 rounded-xl">
-                        <i data-lucide="lock" id="auth-icon" class="text-slate-400 w-5 h-5 transition-colors"></i>
-                    </div>
-                    <div>
-                        <p id="auth-status-text" class="text-sm font-black text-slate-600">管理權限：尚未驗證</p>
-                        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">輸入管理員密碼以修改係數</p>
-                    </div>
-                </div>
-                <div class="flex gap-2 w-full md:w-auto">
-                    <input type="password" id="admin-password" class="flex-1 md:w-48 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-indigo-500 transition-all" placeholder="輸入密碼...">
-                    <button onclick="verifyAdmin()" id="btn-verify" class="bg-slate-900 text-white px-6 py-2 rounded-xl text-sm font-black hover:bg-black transition-all active:scale-95">驗證</button>
-                    <button onclick="logoutAdmin()" id="btn-logout" class="hidden bg-red-50 text-red-600 px-6 py-2 rounded-xl text-sm font-black hover:bg-red-100 transition-all">登出</button>
-                </div>
-            </div>
-
             <div class="bg-white rounded-[32px] border border-slate-200 shadow-xl overflow-hidden">
                 <div class="px-10 py-8 bg-indigo-600 text-white flex justify-between items-center">
                     <div>
                         <h2 class="text-2xl font-black flex items-center gap-3"><i data-lucide="shield-check" class="w-7 h-7"></i> 28 項完整係數資料庫</h2>
-                        <p class="text-indigo-100 text-sm mt-1">係數已與雲端同步。修改權限受管理員密碼保護。</p>
+                        <p class="text-indigo-100 text-sm mt-1">係數已與雲端同步。修改數值將即時更新所有歷史紀錄計算結果。</p>
                     </div>
                 </div>
                 <div class="overflow-x-auto custom-scrollbar">
@@ -212,7 +191,7 @@
     </main>
 
     <div id="toast" class="hidden fixed bottom-12 right-12 bg-slate-900 text-white px-8 py-5 rounded-[24px] shadow-2xl flex items-center gap-4 border border-slate-700 z-50 transition-all duration-300 transform translate-x-full">
-        <i id="toast-icon" data-lucide="check-circle-2" class="text-emerald-400 w-6 h-6"></i>
+        <i data-lucide="check-circle-2" class="text-emerald-400 w-6 h-6"></i>
         <span id="toast-msg" class="font-black tracking-tight"></span>
     </div>
 
@@ -221,10 +200,6 @@
         let records = [];
         let myPieChart = null, myBarChart = null;
         let userId = null;
-        let isAdmin = false;
-
-        // 管理員密碼 (實際應用中應於後端驗證，此處為單機/演示版本範例)
-        const ADMIN_SECRET = "hw911026";
 
         // 初始係數資料 (若資料庫無資料則以此初始化)
         let factors = [
@@ -262,60 +237,19 @@
             lucide.createIcons();
         };
 
-        // --- 管理員驗證邏輯 ---
-        function verifyAdmin() {
-            const pwdInput = document.getElementById('admin-password');
-            if (pwdInput.value === ADMIN_SECRET) {
-                isAdmin = true;
-                pwdInput.value = '';
-                document.getElementById('auth-status-text').innerText = "管理權限：已驗證";
-                document.getElementById('auth-status-text').classList.remove('text-slate-600');
-                document.getElementById('auth-status-text').classList.add('text-emerald-600');
-                document.getElementById('auth-icon-bg').classList.remove('bg-slate-100');
-                document.getElementById('auth-icon-bg').classList.add('bg-emerald-100');
-                document.getElementById('auth-icon').classList.remove('text-slate-400');
-                document.getElementById('auth-icon').classList.add('text-emerald-600');
-                document.getElementById('auth-icon').setAttribute('data-lucide', 'unlock');
-                
-                document.getElementById('admin-password').classList.add('hidden');
-                document.getElementById('btn-verify').classList.add('hidden');
-                document.getElementById('btn-logout').classList.remove('hidden');
-                
-                triggerToast('管理員驗證成功');
-                renderFactors();
-                lucide.createIcons();
-            } else {
-                triggerToast('密碼錯誤', 'red');
-            }
-        }
-
-        function logoutAdmin() {
-            isAdmin = false;
-            document.getElementById('auth-status-text').innerText = "管理權限：尚未驗證";
-            document.getElementById('auth-status-text').classList.replace('text-emerald-600', 'text-slate-600');
-            document.getElementById('auth-icon-bg').classList.replace('bg-emerald-100', 'bg-slate-100');
-            document.getElementById('auth-icon').classList.replace('text-emerald-600', 'text-slate-400');
-            document.getElementById('auth-icon').setAttribute('data-lucide', 'lock');
-            
-            document.getElementById('admin-password').classList.remove('hidden');
-            document.getElementById('btn-verify').classList.remove('hidden');
-            document.getElementById('btn-logout').classList.add('hidden');
-            
-            renderFactors();
-            lucide.createIcons();
-        }
-
         // --- Firebase 即時數據監控 ---
         function startSync(uid) {
             userId = uid;
             document.getElementById('sync-status').classList.remove('bg-red-500');
             document.getElementById('sync-status').classList.add('bg-emerald-500');
 
+            // 1. 同步係數資料庫 (私有)
             const factorsCol = window.fs.collection(window.db, 'artifacts', window.appId, 'users', uid, 'factors');
             window.fs.onSnapshot(factorsCol, (snapshot) => {
                 if (!snapshot.empty) {
                     factors = snapshot.docs.map(doc => doc.data());
                 } else {
+                    // 第一次使用，上傳預設係數
                     factors.forEach(f => {
                         window.fs.setDoc(window.fs.doc(factorsCol, f.id), f);
                     });
@@ -325,9 +259,11 @@
                 updateDashboard();
             }, (err) => console.error("Factors Sync Error:", err));
 
+            // 2. 同步錄入紀錄 (私有)
             const recordsCol = window.fs.collection(window.db, 'artifacts', window.appId, 'users', uid, 'records');
             window.fs.onSnapshot(recordsCol, (snapshot) => {
                 records = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                // 照日期降序排列
                 records.sort((a, b) => b.timestamp - a.timestamp);
                 updateDashboard();
             }, (err) => console.error("Records Sync Error:", err));
@@ -379,23 +315,21 @@
                             f.type === 'refrigerant' ? (f.escapeRate * f.gwp) :
                             f.type === 'ch4_only' ? (f.ch4_factor * 27) : f.factor || f.co2;
 
-                const inputClass = isAdmin ? "w-20 text-right bg-white border border-slate-200 p-1 rounded focus:border-indigo-500 shadow-inner" : "w-20 text-right locked-input";
-
                 return `
                     <tr class="hover:bg-slate-50 transition-colors">
                         <td class="px-8 py-5 font-bold text-slate-700">${f.name}<div class="text-[9px] text-slate-400 font-bold tracking-tighter uppercase">${f.unit}</div></td>
                         <td class="px-4 py-5"><span class="px-2 py-0.5 rounded text-[9px] font-black uppercase ${f.category === 'scope1' ? 'bg-red-50 text-red-600' : f.category === 'scope2' ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'}">${f.category}</span></td>
                         <td class="px-4 py-5 text-right">
-                            <input type="number" ${!isAdmin ? 'readonly' : ''} onchange="updateF('${f.id}','${f.type === 'single' ? 'factor' : 'co2'}',this.value)" value="${f.factor || f.co2 || 0}" step="any" class="${inputClass}">
+                            <input type="number" onchange="updateF('${f.id}','${f.type === 'single' ? 'factor' : 'co2'}',this.value)" value="${f.factor || f.co2 || 0}" step="any" class="w-20 text-right bg-transparent border-b border-transparent focus:border-indigo-500 hover:bg-white p-1 rounded">
                         </td>
                         <td class="px-4 py-5 text-right">
                             ${(f.ch4 !== undefined || f.ch4_factor !== undefined) ? 
-                                `<input type="number" ${!isAdmin ? 'readonly' : ''} onchange="updateF('${f.id}','${f.ch4_factor !== undefined ? 'ch4_factor' : 'ch4'}',this.value)" value="${f.ch4 || f.ch4_factor || 0}" step="any" class="${inputClass}">` 
+                                `<input type="number" onchange="updateF('${f.id}','${f.ch4_factor !== undefined ? 'ch4_factor' : 'ch4'}',this.value)" value="${f.ch4 || f.ch4_factor || 0}" step="any" class="w-20 text-right bg-transparent border-b border-transparent focus:border-indigo-500 hover:bg-white p-1 rounded">` 
                                 : '-'}
                         </td>
                         <td class="px-4 py-5 text-right">
                             ${f.n2o !== undefined ? 
-                                `<input type="number" ${!isAdmin ? 'readonly' : ''} onchange="updateF('${f.id}','n2o',this.value)" value="${f.n2o || 0}" step="any" class="${inputClass}">` 
+                                `<input type="number" onchange="updateF('${f.id}','n2o',this.value)" value="${f.n2o || 0}" step="any" class="w-20 text-right bg-transparent border-b border-transparent focus:border-indigo-500 hover:bg-white p-1 rounded">` 
                                 : '-'}
                         </td>
                         <td class="px-4 py-5 text-right">
@@ -403,11 +337,11 @@
                                 <div class="flex flex-col items-end gap-1">
                                     <div class="flex items-center gap-1">
                                         <span class="text-[8px] text-slate-400 font-bold">GWP:</span>
-                                        <input type="number" ${!isAdmin ? 'readonly' : ''} onchange="updateF('${f.id}','gwp',this.value)" value="${f.gwp}" step="any" class="w-16 text-right text-[10px] bg-slate-50 border-none rounded px-1 ${!isAdmin ? 'locked-input' : ''}">
+                                        <input type="number" onchange="updateF('${f.id}','gwp',this.value)" value="${f.gwp}" step="any" class="w-16 text-right text-[10px] bg-slate-100 border-none rounded px-1">
                                     </div>
                                     <div class="flex items-center gap-1">
                                         <span class="text-[8px] text-slate-400 font-bold">RATE:</span>
-                                        <input type="number" ${!isAdmin ? 'readonly' : ''} onchange="updateF('${f.id}','escapeRate',this.value)" value="${f.escapeRate}" step="any" class="w-16 text-right text-[10px] bg-slate-50 border-none rounded px-1 ${!isAdmin ? 'locked-input' : ''}">
+                                        <input type="number" onchange="updateF('${f.id}','escapeRate',this.value)" value="${f.escapeRate}" step="any" class="w-16 text-right text-[10px] bg-slate-100 border-none rounded px-1">
                                     </div>
                                 </div>
                             ` : '-'}
@@ -420,10 +354,7 @@
         }
 
         async function updateF(id, field, val) {
-            if (!userId || !isAdmin) {
-                if (!isAdmin) triggerToast('請先驗證管理員身份', 'red');
-                return;
-            }
+            if (!userId) return;
             const factor = factors.find(f => f.id === id);
             if (factor) {
                 factor[field] = parseFloat(val);
@@ -545,21 +476,9 @@
             } catch (e) { console.error(e); }
         }
 
-        function triggerToast(msg, type = 'emerald') {
+        function triggerToast(msg) {
             const t = document.getElementById('toast');
-            const icon = document.getElementById('toast-icon');
-            
             document.getElementById('toast-msg').innerText = msg;
-            
-            if (type === 'red') {
-                icon.classList.replace('text-emerald-400', 'text-red-400');
-                icon.setAttribute('data-lucide', 'alert-circle');
-            } else {
-                icon.classList.replace('text-red-400', 'text-emerald-400');
-                icon.setAttribute('data-lucide', 'check-circle-2');
-            }
-            
-            lucide.createIcons();
             t.classList.remove('hidden');
             setTimeout(() => t.style.transform = 'translateX(0)', 10);
             setTimeout(() => { 
