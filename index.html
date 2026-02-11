@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>大量科技排放計算系統 - 雲端資料版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, query, addDoc, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // 環境變數
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'ghgtl-main-system';
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // 全域變數
+        let records = [];
+        let factors = [];
+        let user = null;
+        let myPieChart = null, myBarChart = null;
+
+        // 預設係數
+        const defaultFactors = [
+            { id: 'gen_diesel', name: '緊急發電機', category: 'scope1', type: 'fuel', unit: '公秉', co2: 2.6792488757, ch4: 0.0001084716, n2o: 0.0000216943, desc: '固定 (E)' },
+            { id: 'car_gasoline', name: '車用汽油', category: 'scope1', type: 'fuel', unit: '公秉', co2: 2.2010417906, ch4: 0.0007940266, n2o: 0.0002540885, desc: '移動 (T)' },
+            { id: 'forklift_diesel', name: '堆高機', category: 'scope1', type: 'fuel', unit: '公秉', co2: 2.6792488757, ch4: 0.0001410131, n2o: 0.0001410131, desc: '移動 (T)' },
+            { id: 'cleaner_wurth', name: 'WURTH煞車盤清潔劑', category: 'scope1', type: 'direct_co2', unit: '公噸', co2: 1, ch4: 0, n2o: 0, desc: '逸散 (F)' },
+            { id: 'ext_co2_refill', name: 'CO2滅火器 (填充)', category: 'scope1', type: 'direct_co2', unit: '公噸', co2: 1, ch4: 0, n2o: 0, desc: '逸散 (F)' },
+            { id: 'ext_co2_all', name: 'CO2滅火器 (使用+填充)', category: 'scope1', type: 'direct_co2', unit: '公噸', co2: 1, ch4: 0, n2o: 0, desc: '逸散 (F)' },
+            { id: 'manure_water', name: '水肥(出勤人數)', category: 'scope1', type: 'ch4_only', unit: '人小時', ch4_factor: 0.3, desc: '生物處理' },
+            { id: 'car_ac_r134a', name: '(車用空調) R-134a', category: 'scope1', type: 'refrigerant', unit: '公噸', escapeRate: 0.15, gwp: 1530.0, desc: '交通工具' },
+            { id: 'car_ac_r1234yf', name: '(車用空調) R-1234yf', category: 'scope1', type: 'refrigerant', unit: '公噸', escapeRate: 0.15, gwp: 0.501, desc: '交通工具' },
+            { id: 'dehumid_r134a', name: '(除濕機) R-134a', category: 'scope1', type: 'refrigerant', unit: '公噸', escapeRate: 0.003, gwp: 1530, desc: '小型設備' },
+            { id: 'dispenser_r134a', name: '(飲水機/冰箱) R-134a', category: 'scope1', type: 'refrigerant', unit: '公噸', escapeRate: 0.003, gwp: 1530, desc: '小型設備' },
+            { id: 'dispenser_r600a', name: '(飲水機/冰箱) R-600a', category: 'scope1', type: 'refrigerant', unit: '公噸', escapeRate: 0.003, gwp: 0, desc: '天然冷媒' },
+            { id: 'dispenser_r404a', name: '(飲水機/冰箱) R-404a', category: 'scope1', type: 'refrigerant', unit: '公噸', escapeRate: 0.08, gwp: 4728, desc: '小型設備' },
+            { id: 'dryer_r134a', name: '(冷凍乾燥機) R-134a', category: 'scope1', type: 'refrigerant', unit: '公噸', escapeRate: 0.08, gwp: 1530, desc: '生產設備' },
+            { id: 'dryer_r22', name: '(冷凍乾燥機) R-22', category: 'scope1', type: 'refrigerant', unit: '公噸', escapeRate: 0.08, gwp: 1960, desc: '生產設備' },
+            { id: 'chiller_r410a', name: '(冰水機) R-410A', category: 'scope1', type: 'refrigerant', unit: '公噸', escapeRate: 0.085, gwp: 2255.5, desc: '空調機組' },
+            { id: 'ac_r410a', name: '(冷氣) R-410A', category: 'scope1', type: 'refrigerant', unit: '公噸', escapeRate: 0.055, gwp: 2255.5, desc: '空調設備' },
+            { id: 'ac_r32', name: '(冷氣) R-32', category: 'scope1', type: 'refrigerant', unit: '公噸', escapeRate: 0.055, gwp: 771, desc: '空調設備' },
+            { id: 'ac_r22', name: '(冷氣) R-22', category: 'scope1', type: 'refrigerant', unit: '公噸', escapeRate: 0.055, gwp: 1960, desc: '空調設備' },
+            { id: 'cool_r134a', name: '(冷卻機) R-134a', category: 'scope1', type: 'refrigerant', unit: '公噸', escapeRate: 0.08, gwp: 1530.0, desc: '設備冷卻' },
+            { id: 'cool_r410a', name: '(冷卻機) R-410A', category: 'scope1', type: 'refrigerant', unit: '公噸', escapeRate: 0.08, gwp: 2255.5, desc: '設備冷卻' },
+            { id: 'cool_r407c', name: '(冷卻機) R-407C', category: 'scope1', type: 'refrigerant', unit: '公噸', escapeRate: 0.08, gwp: 1907.93, desc: '設備冷卻' },
+            { id: 'cool_r22_m', name: '(冷卻機) R-22', category: 'scope1', type: 'refrigerant', unit: '公噸', escapeRate: 0.08, gwp: 1960, desc: '設備冷卻' },
+            { id: 'electricity', name: '外購電力', category: 'scope2', type: 'single', unit: '千度', factor: 0.494, desc: '能源署 2023' },
+            { id: 'elec_up', name: '電力上游開採及輸配碳足跡', category: 'scope3', type: 'single', unit: '千度', factor: 0.1108, desc: '間接' },
+            { id: 'water', name: '自來水', category: 'scope3', type: 'single', unit: '千度', factor: 0.233, desc: '間接' },
+            { id: 'diesel_up_fix', name: '柴油上游排放(固定)-使用量', category: 'scope3', type: 'single', unit: '公備', factor: 0.677, desc: '間接' },
+            { id: 'diesel_up_mov', name: '柴油上游排放(移動)-使用量', category: 'scope3', type: 'single', unit: '公備', factor: 0.677, desc: '間接' },
+            { id: 'gasoline_up', name: '汽油上游排放', category: 'scope3', type: 'single', unit: '公備', factor: 0.6078, desc: '間接' },
+        ];
+
+        // 初始化驗證 (RULE 3)
+        const initAuth = async () => {
+            try {
+                // 優先使用提供的 Token，否則使用匿名登入
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                
+                onAuthStateChanged(auth, (u) => {
+                    if (u) {
+                        user = u;
+                        console.log("Authenticated as:", user.uid);
+                        initSync();
+                    }
+                });
+            } catch (err) {
+                console.error("Auth Error:", err);
+            }
+        };
+
+        // 資料同步 (RULE 1 & 2)
+        const initSync = () => {
+            if (!user) return;
+
+            // 1. 係數庫同步
+            const factorDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'factors');
+            
+            onSnapshot(factorDocRef, (snapshot) => {
+                if (!user) return; // Guard
+                if (snapshot.exists()) {
+                    factors = snapshot.data().list || [];
+                } else {
+                    factors = defaultFactors;
+                    setDoc(factorDocRef, { list: defaultFactors }).catch(e => console.error("Initial factors save error:", e));
+                }
+                renderFactors();
+                populateSelect();
+                updateDashboard();
+            }, (err) => {
+                console.error("Factors Sync Error:", err);
+                // 發生權限錯誤時嘗試重連或提示
+            });
+
+            // 2. 紀錄同步 (不使用 orderBy 以符合 RULE 2)
+            const recordsCol = collection(db, 'artifacts', appId, 'public', 'data', 'records');
+            onSnapshot(recordsCol, (snapshot) => {
+                if (!user) return; // Guard
+                records = snapshot.docs.map(d => ({ docId: d.id, ...d.data() }));
+                // 在記憶體中進行排序
+                records.sort((a,b) => (b.timestamp || 0) - (a.timestamp || 0));
+                updateDashboard();
+            }, (err) => {
+                console.error("Records Sync Error:", err);
+            });
+        };
+
+        // 事件處理
+        window.updateF = async (id, field, val) => {
+            if (!user) return;
+            const idx = factors.findIndex(f => f.id === id);
+            if (idx !== -1) {
+                factors[idx][field] = parseFloat(val);
+                const factorDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'factors');
+                try {
+                    await setDoc(factorDocRef, { list: factors }, { merge: true });
+                    triggerToast('雲端係數庫已同步更新');
+                } catch (e) { console.error("Update Factors Error:", e); }
+            }
+        };
+
+        window.deleteRecord = async (docId) => {
+            if (!user) return;
+            const recordDoc = doc(db, 'artifacts', appId, 'public', 'data', 'records', docId);
+            try {
+                await deleteDoc(recordDoc);
+                triggerToast('雲端紀錄已刪除');
+            } catch (e) { console.error("Delete Record Error:", e); }
+        };
+
+        window.saveNewRecord = async () => {
+            if (!user) return;
+            const sourceId = document.getElementById('source-select').value;
+            const value = parseFloat(document.getElementById('input-value').value);
+            const note = document.getElementById('input-note').value;
+            if(!value && value !== 0) return;
+
+            const recordsCol = collection(db, 'artifacts', appId, 'public', 'data', 'records');
+            try {
+                await addDoc(recordsCol, {
+                    sourceId,
+                    value,
+                    note,
+                    date: new Date().toLocaleDateString(),
+                    timestamp: Date.now(),
+                    userId: user.uid
+                });
+                
+                document.getElementById('input-value').value = '';
+                document.getElementById('input-note').value = '';
+                triggerToast('數據已存至雲端');
+            } catch (e) { console.error("Save Record Error:", e); }
+        };
+
+        // 計算邏輯
+        window.calculateEmission = (r) => {
+            const f = factors.find(it => it.id === r.sourceId);
+            if (!f) return 0;
+            if (f.type === 'fuel') return r.value * (f.co2 * 1 + f.ch4 * 27 + f.n2o * 273);
+            if (f.type === 'refrigerant') return r.value * (f.escapeRate || 0) * (f.gwp || 0);
+            if (f.type === 'ch4_only') return r.value * (f.ch4_factor || 0) * 27;
+            if (f.type === 'single') return r.value * (f.factor || 0);
+            return r.value * (f.co2 || 0);
+        };
+
+        // 更新介面
+        const updateDashboard = () => {
+            let s1 = 0, s2 = 0, s3 = 0;
+            records.forEach(r => {
+                const f = factors.find(it => it.id === r.sourceId);
+                if(!f) return;
+                const emission = calculateEmission(r);
+                if (f.category === 'scope1') s1 += emission;
+                else if (f.category === 'scope2') s2 += emission;
+                else s3 += emission;
+            });
+
+            const total = s1 + s2 + s3;
+            const totalEl = document.getElementById('total-val');
+            const s1El = document.getElementById('s1-val');
+            const s2El = document.getElementById('s2-val');
+            const s3El = document.getElementById('s3-val');
+
+            if(totalEl) totalEl.innerText = total.toFixed(3);
+            if(s1El) s1El.innerText = s1.toFixed(4);
+            if(s2El) s2El.innerText = s2.toFixed(4);
+            if(s3El) s3El.innerText = s3.toFixed(4);
+
+            renderTable('dashboard-table-container', records, false);
+            renderTable('calculator-table-container', records, true);
+            updateCharts(s1, s2, s3);
+        };
+
+        const updateCharts = (s1, s2, s3) => {
+            const ctxPie = document.getElementById('pieChart')?.getContext('2d');
+            const ctxBar = document.getElementById('barChart')?.getContext('2d');
+            if(!ctxPie || !ctxBar) return;
+
+            const data = [s1, s2, s3];
+            const colors = ['#ef4444', '#f59e0b', '#10b981'];
+
+            if (myPieChart) myPieChart.destroy();
+            myPieChart = new Chart(ctxPie, {
+                type: 'doughnut',
+                data: { labels: ['範疇一', '範疇二', '範疇三'], datasets: [{ data, backgroundColor: colors, borderWidth: 0 }] },
+                options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, cutout: '70%' }
+            });
+
+            if (myBarChart) myBarChart.destroy();
+            myBarChart = new Chart(ctxBar, {
+                type: 'bar',
+                data: { labels: ['範疇一', '範疇二', '範疇三'], datasets: [{ data, backgroundColor: colors, borderRadius: 12 }] },
+                options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { display: false } }, x: { grid: { display: false } } } }
+            });
+        };
+
+        const renderTable = (containerId, data, showDelete = false) => {
+            const container = document.getElementById(containerId);
+            if(!container) return;
+            const html = `
+                <div class="bg-white rounded-[32px] border border-slate-200 shadow-sm overflow-hidden mt-8">
+                    <div class="px-10 py-6 border-b border-slate-100 bg-slate-50/30 flex justify-between items-center">
+                        <h3 class="font-black text-slate-800 flex items-center gap-2"><i data-lucide="list"></i> 紀錄清單 (${data.length})</h3>
+                        ${!showDelete ? `<button onclick="exportToExcel()" class="bg-indigo-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-indigo-700">匯出報告 (Excel)</button>` : ''}
+                    </div>
+                    <table class="w-full text-left text-xs">
+                        <thead class="bg-slate-50 text-slate-400 font-black uppercase tracking-widest border-b">
+                            <tr><th class="px-10 py-4">日期</th><th class="px-6 py-4">項目</th><th class="px-6 py-4 text-right">數量</th><th class="px-6 py-4 text-right">當量 (tCO2e)</th><th class="px-10 py-4 text-right">操作</th></tr>
+                        </thead>
+                        <tbody class="divide-y">${data.map(r => {
+                            const f = factors.find(it => it.id === r.sourceId);
+                            if(!f) return '';
+                            return `<tr>
+                                <td class="px-10 py-4 font-bold">${r.date}</td>
+                                <td class="px-6 py-4">${f.name}</td>
+                                <td class="px-6 py-4 text-right font-mono">${r.value} ${f.unit}</td>
+                                <td class="px-6 py-4 text-right font-mono font-black text-indigo-600">${calculateEmission(r).toFixed(4)}</td>
+                                <td class="px-10 py-4 text-right">${showDelete ? `<button onclick="deleteRecord('${r.docId}')" class="text-red-400 hover:text-red-600"><i data-lucide="trash-2" class="w-4 h-4"></i></button>` : `<span class="text-slate-400">${r.note || '-'}</span>`}</td>
+                            </tr>`;
+                        }).join('')}</tbody>
+                    </table>
+                </div>
+            `;
+            container.innerHTML = html;
+            lucide.createIcons();
+        };
+
+        const renderFactors = () => {
+            const body = document.getElementById('factors-body');
+            if(!body) return;
+            body.innerHTML = factors.map(f => {
+                let total = f.type === 'fuel' ? (f.co2 + f.ch4*27 + f.n2o*273) : 
+                            f.type === 'refrigerant' ? (f.escapeRate * f.gwp) :
+                            f.type === 'ch4_only' ? (f.ch4_factor * 27) : f.factor || f.co2;
+
+                return `
+                    <tr class="hover:bg-slate-50 transition-colors">
+                        <td class="px-8 py-5 font-bold text-slate-700">${f.name}<div class="text-[9px] text-slate-400 font-bold tracking-tighter uppercase">${f.unit}</div></td>
+                        <td class="px-4 py-5"><span class="px-2 py-0.5 rounded text-[9px] font-black uppercase ${f.category === 'scope1' ? 'bg-red-50 text-red-600' : f.category === 'scope2' ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'}">${f.category}</span></td>
+                        <td class="px-4 py-5 text-right">
+                            <input type="number" onchange="updateF('${f.id}','${f.type === 'single' ? 'factor' : 'co2'}',this.value)" value="${f.factor || f.co2 || 0}" step="any" class="w-20 text-right bg-transparent border-b border-transparent focus:border-indigo-500 hover:bg-white p-1 rounded transition-all">
+                        </td>
+                        <td class="px-4 py-5 text-right">
+                            ${(f.ch4 !== undefined || f.ch4_factor !== undefined) ? 
+                                `<input type="number" onchange="updateF('${f.id}','${f.ch4_factor !== undefined ? 'ch4_factor' : 'ch4'}',this.value)" value="${f.ch4 || f.ch4_factor || 0}" step="any" class="w-20 text-right bg-transparent border-b border-transparent focus:border-indigo-500 hover:bg-white p-1 rounded transition-all">` 
+                                : '-'}
+                        </td>
+                        <td class="px-4 py-5 text-right">
+                            ${f.n2o !== undefined ? 
+                                `<input type="number" onchange="updateF('${f.id}','n2o',this.value)" value="${f.n2o || 0}" step="any" class="w-20 text-right bg-transparent border-b border-transparent focus:border-indigo-500 hover:bg-white p-1 rounded transition-all">` 
+                                : '-'}
+                        </td>
+                        <td class="px-4 py-5 text-right">
+                            ${f.type === 'refrigerant' ? `
+                                <div class="flex flex-col items-end gap-1">
+                                    <div class="flex items-center gap-1">
+                                        <span class="text-[8px] text-slate-400 font-bold">GWP:</span>
+                                        <input type="number" onchange="updateF('${f.id}','gwp',this.value)" value="${f.gwp}" step="any" class="w-16 text-right text-[10px] bg-slate-100 border-none rounded px-1">
+                                    </div>
+                                    <div class="flex items-center gap-1">
+                                        <span class="text-[8px] text-slate-400 font-bold">RATE:</span>
+                                        <input type="number" onchange="updateF('${f.id}','escapeRate',this.value)" value="${f.escapeRate}" step="any" class="w-16 text-right text-[10px] bg-slate-100 border-none rounded px-1">
+                                    </div>
+                                </div>
+                            ` : '-'}
+                        </td>
+                        <td class="px-4 py-5 text-right font-black text-indigo-600 bg-indigo-50/20">${Number(total).toFixed(6)}</td>
+                        <td class="px-8 py-5 text-slate-400 text-[10px]">${f.desc}</td>
+                    </tr>
+                `;
+            }).join('');
+        };
+
+        const populateSelect = () => {
+            const select = document.getElementById('source-select');
+            if(!select) return;
+            select.innerHTML = '';
+            const groups = { scope1: '🔴 範疇一 (直接)', scope2: '🟡 範疇二 (電力)', scope3: '🟢 範疇三 (間接)' };
+            Object.keys(groups).forEach(key => {
+                const filtered = factors.filter(f => f.category === key);
+                if (filtered.length > 0) {
+                    const optgroup = document.createElement('optgroup');
+                    optgroup.label = groups[key];
+                    filtered.forEach(f => {
+                        const opt = new Option(`${f.name} (${f.unit})`, f.id);
+                        optgroup.appendChild(opt);
+                    });
+                    select.appendChild(optgroup);
+                }
+            });
+        };
+
+        window.exportToExcel = () => {
+            if (records.length === 0) return triggerToast('無資料可匯出');
+            const excelData = records.map(r => {
+                const f = factors.find(it => it.id === r.sourceId);
+                const emission = calculateEmission(r);
+                return {
+                    '範疇/類別項目': f.category === 'scope1' ? '範疇1' : f.category === 'scope2' ? '範疇2' : '類別3',
+                    '原燃物料或產品名稱': f.name,
+                    '活動數據': r.value,
+                    '單位': f.unit,
+                    '當量(tCO2e)': emission.toFixed(6),
+                    '日期': r.date,
+                    '備註': r.note
+                };
+            });
+            const ws = XLSX.utils.json_to_sheet(excelData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Inventory_Report");
+            XLSX.writeFile(wb, "大量科技排放雲端報告.xlsx");
+        };
+
+        window.triggerToast = (msg) => {
+            const t = document.getElementById('toast');
+            document.getElementById('toast-msg').innerText = msg;
+            t.classList.remove('hidden');
+            setTimeout(() => t.style.transform = 'translateX(0)', 10);
+            setTimeout(() => { 
+                t.style.transform = 'translateX(100%)'; 
+                setTimeout(() => t.classList.add('hidden'), 300); 
+            }, 3000);
+        };
+
+        window.switchTab = (tabId) => {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('bg-white', 'text-slate-900', 'shadow-md'));
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.add('text-slate-500'));
+            
+            const targetTab = document.getElementById(`tab-${tabId}`);
+            const targetBtn = document.getElementById(`btn-${tabId}`);
+            if(targetTab) targetTab.classList.add('active');
+            if(targetBtn) targetBtn.classList.add('bg-white', 'text-slate-900', 'shadow-md');
+        };
+
+        // 啟動應用
+        window.onload = () => {
+            initAuth();
+            lucide.createIcons();
+        };
+    </script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
+        body { font-family: 'Noto Sans TC', sans-serif; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+    <nav class="bg-white border-b border-slate-200 px-8 py-5 flex justify-between items-center shadow-sm sticky top-0 z-20">
+        <div class="flex items-center gap-3">
+            <div class="bg-indigo-600 p-2 rounded-xl shadow-indigo-200 shadow-lg">
+                <i data-lucide="cloud" class="text-white w-5 h-5"></i>
+            </div>
+            <div>
+                <h1 class="text-xl font-black text-slate-800 tracking-tight">大量科技排放計算系統</h1>
+                <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Firestore Cloud Edition v6.3 (Security Guard Update)</p>
+            </div>
+        </div>
+        <div class="flex gap-2 bg-slate-100 p-1.5 rounded-2xl">
+            <button onclick="switchTab('dashboard')" id="btn-dashboard" class="tab-btn active flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-black transition-all bg-white text-slate-900 shadow-md">
+                <i data-lucide="layout-dashboard" class="w-4 h-4"></i> <span>儀表板</span>
+            </button>
+            <button onclick="switchTab('calculator')" id="btn-calculator" class="tab-btn flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-black transition-all text-slate-500 hover:text-slate-800">
+                <i data-lucide="calculator" class="w-4 h-4"></i> <span>數據錄入</span>
+            </button>
+            <button onclick="switchTab('settings')" id="btn-settings" class="tab-btn flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-black transition-all text-slate-500 hover:text-slate-800">
+                <i data-lucide="settings" class="w-4 h-4"></i> <span>係數資料庫</span>
+            </button>
+        </div>
+    </nav>
+
+    <main class="flex-1 overflow-y-auto p-8">
+        <!-- 儀表板頁面 -->
+        <div id="tab-dashboard" class="tab-content active max-w-6xl mx-auto space-y-8">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-5">
+                <div class="bg-white p-6 rounded-3xl shadow-sm border-l-8 border-slate-900 flex justify-between items-start">
+                    <div>
+                        <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">總排放量</h4>
+                        <div class="flex items-baseline gap-1">
+                            <span id="total-val" class="text-2xl font-black text-slate-800 tracking-tighter">0.000</span>
+                            <span class="text-[10px] font-bold text-slate-400">tCO2e</span>
+                        </div>
+                    </div>
+                    <div class="p-3 bg-slate-50 rounded-2xl"><i data-lucide="activity" class="text-slate-500"></i></div>
+                </div>
+                <div class="bg-white p-6 rounded-3xl shadow-sm border-l-8 border-red-500 flex justify-between items-start">
+                    <div>
+                        <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">範疇一: 直接</h4>
+                        <div class="flex items-baseline gap-1"><span id="s1-val" class="text-2xl font-black text-slate-800 tracking-tighter">0.0000</span><span class="text-[10px] font-bold text-slate-400">tCO2e</span></div>
+                    </div>
+                    <div class="p-3 bg-slate-50 rounded-2xl"><i data-lucide="truck" class="text-red-500"></i></div>
+                </div>
+                <div class="bg-white p-6 rounded-3xl shadow-sm border-l-8 border-amber-500 flex justify-between items-start">
+                    <div>
+                        <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">範疇二: 能源</h4>
+                        <div class="flex items-baseline gap-1"><span id="s2-val" class="text-2xl font-black text-slate-800 tracking-tighter">0.0000</span><span class="text-[10px] font-bold text-slate-400">tCO2e</span></div>
+                    </div>
+                    <div class="p-3 bg-slate-50 rounded-2xl"><i data-lucide="zap" class="text-amber-500"></i></div>
+                </div>
+                <div class="bg-white p-6 rounded-3xl shadow-sm border-l-8 border-emerald-500 flex justify-between items-start">
+                    <div>
+                        <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">範疇三: 間接</h4>
+                        <div class="flex items-baseline gap-1"><span id="s3-val" class="text-2xl font-black text-slate-800 tracking-tighter">0.0000</span><span class="text-[10px] font-bold text-slate-400">tCO2e</span></div>
+                    </div>
+                    <div class="p-3 bg-slate-50 rounded-2xl"><i data-lucide="droplets" class="text-emerald-500"></i></div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[400px]">
+                <div class="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col h-full">
+                    <h3 class="font-black text-slate-700 mb-6 text-sm uppercase tracking-widest border-l-4 border-indigo-600 pl-4">排放結構分析</h3>
+                    <div class="flex-1 relative"><canvas id="pieChart"></canvas></div>
+                </div>
+                <div class="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col h-full">
+                    <h3 class="font-black text-slate-700 mb-6 text-sm uppercase tracking-widest border-l-4 border-indigo-600 pl-4">範疇強度對比</h3>
+                    <div class="flex-1 relative"><canvas id="barChart"></canvas></div>
+                </div>
+            </div>
+
+            <div id="dashboard-table-container"></div>
+        </div>
+
+        <!-- 數據錄入頁面 -->
+        <div id="tab-calculator" class="tab-content max-w-4xl mx-auto space-y-8">
+            <div class="bg-white p-10 rounded-[40px] shadow-sm border border-slate-200">
+                <h2 class="text-2xl font-black mb-8 text-slate-800 flex items-center gap-3">
+                    <i data-lucide="database" class="bg-indigo-600 text-white rounded-xl p-1.5 w-8 h-8"></i>
+                    錄入活動數據 (雲端同步)
+                </h2>
+                <form onsubmit="event.preventDefault(); saveNewRecord();" class="space-y-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="space-y-2">
+                            <label class="text-xs font-black text-slate-400 uppercase ml-1 tracking-widest">排放源項目</label>
+                            <select id="source-select" class="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-5 py-4 focus:border-indigo-500 outline-none transition-all font-bold cursor-pointer"></select>
+                        </div>
+                        <div class="space-y-2">
+                            <label class="text-xs font-black text-slate-400 uppercase ml-1 tracking-widest">數量 (活動數據)</label>
+                            <input type="number" id="input-value" step="any" required class="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-5 py-4 focus:border-indigo-500 outline-none transition-all font-mono font-bold text-lg text-indigo-600" placeholder="0.00">
+                        </div>
+                    </div>
+                    <div class="space-y-2">
+                        <label class="text-xs font-black text-slate-400 uppercase ml-1 tracking-widest">備註內容</label>
+                        <input id="input-note" class="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl px-5 py-4 focus:border-indigo-500 outline-none transition-all" placeholder="輸入說明事項...">
+                    </div>
+                    <button type="submit" class="w-full bg-slate-900 text-white font-black py-5 rounded-3xl hover:bg-black transition-all shadow-xl flex items-center justify-center gap-3 active:scale-[0.98]">
+                        <i data-lucide="upload-cloud" class="w-5 h-5"></i> 儲存至雲端
+                    </button>
+                </form>
+            </div>
+            <div id="calculator-table-container"></div>
+        </div>
+
+        <!-- 係數資料庫頁面 -->
+        <div id="tab-settings" class="tab-content max-w-full mx-auto space-y-4">
+            <div class="bg-white rounded-[32px] border border-slate-200 shadow-xl overflow-hidden">
+                <div class="px-10 py-8 bg-indigo-600 text-white flex justify-between items-center">
+                    <div>
+                        <h2 class="text-2xl font-black flex items-center gap-3"><i data-lucide="shield-check" class="w-7 h-7"></i> 完整係數資料庫 (雲端鎖定)</h2>
+                        <p class="text-indigo-100 text-sm mt-1">此處修改將即時影響所有歷史紀錄之計算結果。</p>
+                    </div>
+                </div>
+                <div class="overflow-x-auto custom-scrollbar">
+                    <table class="w-full text-left">
+                        <thead class="bg-slate-50 text-slate-400 text-[10px] font-black uppercase tracking-widest border-b border-slate-100">
+                            <tr>
+                                <th class="px-8 py-6">名稱與單位</th>
+                                <th class="px-4 py-6">範疇</th>
+                                <th class="px-4 py-6 text-right">CO2/單一係數</th>
+                                <th class="px-4 py-6 text-right">CH4 係數</th>
+                                <th class="px-4 py-6 text-right">N2O 係數</th>
+                                <th class="px-4 py-6 text-right">GWP / 逸散率</th>
+                                <th class="px-4 py-6 text-right bg-indigo-50/50 text-indigo-600">總當量 (tCO2e/Unit)</th>
+                                <th class="px-8 py-6">來源說明</th>
+                            </tr>
+                        </thead>
+                        <tbody id="factors-body" class="divide-y divide-slate-50 text-[11px]"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div id="toast" class="hidden fixed bottom-12 right-12 bg-slate-900 text-white px-8 py-5 rounded-[24px] shadow-2xl flex items-center gap-4 border border-slate-700 z-50 transition-all duration-300 transform translate-x-full">
+        <i data-lucide="check-circle-2" class="text-emerald-400 w-6 h-6"></i>
+        <span id="toast-msg" class="font-black tracking-tight"></span>
+    </div>
+
+</body>
+</html>
